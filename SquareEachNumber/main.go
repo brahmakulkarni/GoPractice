@@ -2,11 +2,10 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"sync"
 )
 
-type Input struct {
+type Job struct {
 	Index int
 	Value int
 }
@@ -16,13 +15,13 @@ type Result struct {
 	Value int
 }
 
-func worker(nums []Input, wg *sync.WaitGroup, results chan<- Result) {
+func worker(jobs <-chan Job, wg *sync.WaitGroup, results chan<- Result) {
 	defer wg.Done()
 
-	for _, inp := range nums {
+	for job := range jobs {
 		results <- Result{
-			Index: inp.Index,
-			Value: inp.Value * inp.Value,
+			Index: job.Index,
+			Value: job.Value * job.Value,
 		}
 	}
 }
@@ -31,36 +30,36 @@ func main() {
 	nums := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	n := len(nums)
 
-	var modifiedNums = make([]Input, n)
-	for i, val := range nums {
-		modifiedNums[i] = Input{
-			Index: i,
-			Value: val,
-		}
-	}
-
 	var wg sync.WaitGroup
+	// 1. Create input and output channels
+	jobs := make(chan Job)
 	results := make(chan Result)
 
+	// 2. Spawn the workers
 	numWorkers := 10
-	chunk := int(math.Ceil(float64(n) / float64(numWorkers)))
-
-	start := 0
-	for i := 0; i < numWorkers && start < n; i++ {
+	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-		end := start + chunk
-		if end > n {
-			end = n
-		}
-		go worker(modifiedNums[start:end], &wg, results)
-		start = end
+		go worker(jobs, &wg, results)
 	}
 
+	// 3. Feed jobs channel and close it once done sending all jobs
+	go func() {
+		defer close(jobs)
+		for i, num := range nums {
+			jobs <- Job{
+				Index: i,
+				Value: num,
+			}
+		}
+	}()
+
+	// 4. Close the results channel once all workers have completed processing and shipping the results
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
 
+	// 5. Save results in the correct order
 	answer := make([]int, n)
 	for res := range results {
 		answer[res.Index] = res.Value
