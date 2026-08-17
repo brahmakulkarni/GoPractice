@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -15,40 +17,35 @@ type Result struct {
 	Value int
 }
 
-func worker(jobs <-chan Job, wg *sync.WaitGroup, results chan<- Result) {
-	defer wg.Done()
-
-	for job := range jobs {
-		results <- Result{
-			Index: job.Index,
-			Value: job.Value * job.Value,
-		}
-	}
-}
-
-func main() {
-	nums := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	n := len(nums)
+func process(ctx context.Context, nums []int, workerCount int) ([]int, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	var wg sync.WaitGroup
+	n := len(nums)
+
 	// 1. Create input and output channels
 	jobs := make(chan Job)
 	results := make(chan Result)
+	errChan := make(chan error, 1)
 
 	// 2. Spawn the workers
-	numWorkers := 10
-	for i := 0; i < numWorkers; i++ {
+	for range workerCount {
 		wg.Add(1)
-		go worker(jobs, &wg, results)
+		go worker(ctx, jobs, results, errChan, &wg)
 	}
 
 	// 3. Feed jobs channel and close it once done sending all jobs
 	go func() {
 		defer close(jobs)
 		for i, num := range nums {
-			jobs <- Job{
+			select {
+			case jobs <- Job{
 				Index: i,
 				Value: num,
+			}:
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
@@ -59,10 +56,74 @@ func main() {
 		close(results)
 	}()
 
+
 	// 5. Save results in the correct order
 	answer := make([]int, n)
-	for res := range results {
-		answer[res.Index] = res.Value
+	for {
+		select {
+		case err := <-errChan:
+			cancel()
+			return nil, err
+		case res, ok := <-results:
+			if !ok {
+				return answer, nil
+			}
+			answer[res.Index] = res.Value
+		}
+	}
+}
+
+func computeSquare(num int) (int, error) {
+	if num == 6 {
+		return 0, errors.New("cannot process 6")
+	}
+	return num * num, nil
+}
+
+func worker(ctx context.Context, jobs <-chan Job, results chan<- Result, errChan chan<- error, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job, ok := <-jobs:
+			if !ok {
+				return
+			}
+			squared, err := computeSquare(job.Value)
+			if err != nil {
+				select {
+				case errChan <- err:
+				default:
+					fmt.Println("One error already received. Don't need to report again")
+				}
+
+				return
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case results <- Result{
+				Index: job.Index,
+				Value: squared,
+			}:
+			}
+		}
+	}
+}
+
+func main() {
+	nums := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+	ctx := context.Background()
+
+	answer, err := process(ctx, nums, 10)
+
+	if err != nil {
+		fmt.Println("Processing failed:", err)
+		return
 	}
 
 	fmt.Println("Results in correct order:")
