@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"sync"
+	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Job struct {
@@ -131,35 +135,39 @@ func FetchAll(ctx context.Context, urls []string, workerCount int) ([]string, er
 }
 
 func main() {
-	ctx := context.Background()
+	gin.SetMode(gin.ReleaseMode)
 
-	// all work
+	router := gin.New()
+
+	router.GET("/slow", func(c *gin.Context) {
+		fmt.Println("Server: received request")
+
+		select {
+		case <-time.After(5 * time.Second):
+			fmt.Println("Server: finished work")
+			c.String(http.StatusOK, "Hello")
+		case <-c.Request.Context().Done():
+			fmt.Println("Server: request cancelled")
+		}
+	})
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	urls := []string{
-		"https://httpbin.org/get",
-		"https://httpbin.org/get?name=go",
-		"https://httpbin.org/headers",
-		"https://httpbin.org/user-agent",
-		"https://httpbin.org/ip",
+		server.URL + "/slow",
+		server.URL + "/slow",
+		server.URL + "/slow",
+		server.URL + "/slow",
 	}
-
-	// one will fail
-	// urls := []string{
-	// 	"https://httpbin.org/get",
-	// 	"https://httpbin.org/get?name=go",
-	// 	"https://this-domain-definitely-does-not-exist-123456789.com",
-	// 	"https://httpbin.org/headers",
-	// 	"https://httpbin.org/ip",
-	// }
 
 	results, err := FetchAll(ctx, urls, 2)
 	if err != nil {
 		fmt.Println("FetchAll failed:", err)
-		return
 	}
 
-	fmt.Printf("Successfully fetched %d URLs\n\n", len(results))
-
-	for i, body := range results {
-		fmt.Printf("URL %d: %d bytes\n", i, len(body))
-	}
+	fmt.Println("Successfully fetched:", len(results))
 }
