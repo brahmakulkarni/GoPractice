@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -12,8 +13,13 @@ func main() {
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
 
-	s, _ := in.ReadString('\n')
-	s = strings.TrimSpace(s)
+	numStrings, _ := in.ReadString('\n')
+	numStrings = strings.TrimSpace(numStrings)
+	numStringInt, _ := strconv.Atoi(numStrings)
+	fmt.Println("numStringInt:", numStringInt)
 
-	fmt.Fprintln(out, s)
+	for range numStringInt {
+		greeting, _ := in.ReadString('\n')
+		out.WriteString(greeting)
+	}
 }
