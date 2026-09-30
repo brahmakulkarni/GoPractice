@@ -5,7 +5,12 @@ import (
 	"sync"
 )
 
-func processChunk(data []int, wg *sync.WaitGroup, results chan<- int) {
+type Result struct {
+	ChunkIndex int
+	ChunkSum   int
+}
+
+func processChunk(chunkIndex int, data []int, wg *sync.WaitGroup, results chan<- Result) {
 	defer wg.Done()
 
 	sum := 0
@@ -14,16 +19,21 @@ func processChunk(data []int, wg *sync.WaitGroup, results chan<- int) {
 		sum += v
 	}
 
-	results <- sum
+	results <- Result{
+		ChunkIndex: chunkIndex,
+		ChunkSum: sum,
+	}
 }
 
 func main() {
-	nums := []int{1, 2, 3, 4, 5, 6, 7, 8, 9}
+	nums := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	n := len(nums)
 	chunkSize := 3
 
-	results := make(chan int)
+	results := make(chan Result)
 	var wg sync.WaitGroup
+
+	chunkIndex := 0
 
 	for i := 0; i < n; i += chunkSize {
 		end := i + chunkSize
@@ -35,7 +45,9 @@ func main() {
 		chunk := nums[i:end]
 
 		wg.Add(1)
-		go processChunk(chunk, &wg, results)
+		go processChunk(chunkIndex, chunk, &wg, results)
+
+		chunkIndex++
 	}
 
 	go func() {
@@ -43,8 +55,13 @@ func main() {
 		close(results)
 	}()
 
-	fmt.Println("Results of each chunk:")
+	orderedResult := make([]int, chunkIndex)
 	for output := range results {
-		fmt.Printf("Received result: %d\n", output)
+		orderedResult[output.ChunkIndex] = output.ChunkSum
+	}
+
+	fmt.Println("Results of each chunk:")
+	for index, sum := range orderedResult {
+		fmt.Printf("Received result: Index = %d, Sum = %d\n", index, sum)
 	}
 }
